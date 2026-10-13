@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+security_backup_phase1/
+agentshield/
+reva cyber hack-pavan/
+reva (copy 1)/
