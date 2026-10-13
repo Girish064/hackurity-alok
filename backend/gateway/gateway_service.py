@@ -10,6 +10,8 @@ This service returns either:
 """
 from __future__ import annotations
 
+import logging
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -27,7 +29,13 @@ from backend.exceptions import (
 from backend.gateway.rate_limiter import check_rate_limit
 from backend.gateway.schemas import ActionSubmitRequest
 from backend.policy.engine import evaluate
-from backend.policy.models import Decision
+from backend.policy.models import Decision, PolicyDecision
+from backend.policy.opa_client import (
+    OPAResult,
+    OPAUnavailable,
+    build_opa_input,
+    evaluate_opa_async,
+)
 from backend.services.approval_service import (
     create_approval_request,
     get_approval_for_action,
@@ -75,6 +83,62 @@ async def submit_action(
         action_type=request.action_type,
         parameters=request.parameters,
     )
+
+    # ── 3b. Optional OPA policy check (additive, fail-closed) ────────────
+    # OPA is only consulted when OPA_URL is set; otherwise Python-only.
+    # Fail-closed: OPA unavailable / error → deny immediately.
+    # Both engines must agree to allow; OPA DENY overrides Python ALLOW.
+    # OPA NEEDS_APPROVAL escalates even when Python said ALLOW.
+    opa_url = os.environ.get("OPA_URL", "")
+    if opa_url:
+        _log = logging.getLogger(__name__)
+        _opa_input = build_opa_input(
+            action={
+                "tool": request.action_type.lower(),
+                "tenant_id": str(agent.tenant_id),
+                "environment": "demo",
+                "policy_version": 2,
+                "arguments": request.parameters or {},
+            },
+            agent={
+                "registered": True,
+                "revoked": False,
+                "tenant_id": str(agent.tenant_id),
+                "permitted_tools": list(agent.permissions or []),
+            },
+            resource={"owner_tenant_id": str(agent.tenant_id)},
+            action_digest="",  # digest not yet computed; OPA gets it after
+        )
+        try:
+            _opa_decision = await evaluate_opa_async(_opa_input, opa_url=opa_url)
+            if _opa_decision.result == OPAResult.DENY:
+                _log.warning(
+                    "OPA denied action for agent %s: %s",
+                    agent.id,
+                    _opa_decision.reason,
+                )
+                raise PolicyDeniedError(
+                    f"OPA denied: {_opa_decision.reason}",
+                    request_id=request_id_str,
+                )
+            if _opa_decision.result == OPAResult.NEEDS_APPROVAL:
+                if policy_result.decision == Decision.ALLOW:
+                    _log.info(
+                        "OPA requires approval for agent %s: %s",
+                        agent.id,
+                        _opa_decision.reason,
+                    )
+                    policy_result = PolicyDecision(
+                        decision=Decision.REQUIRE_APPROVAL,
+                        reason=f"OPA requires approval: {_opa_decision.reason}",
+                    )
+            # OPA.ALLOW → continue with Python policy result unchanged
+        except OPAUnavailable as exc:
+            _log.error("OPA unavailable — failing closed: %s", exc)
+            raise PolicyDeniedError(
+                f"Policy check unavailable (OPA): {exc}",
+                request_id=request_id_str,
+            ) from exc
 
     # ── 4. Build the canonical ActionRequest for the security module ──────
     submitted_at = datetime.now(timezone.utc).isoformat()

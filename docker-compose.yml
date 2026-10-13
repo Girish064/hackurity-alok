@@ -56,6 +56,28 @@ services:
     command: >
       sh -c "alembic upgrade head && uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload"
 
+  # ── OPA (Open Policy Agent) ────────────────────────────────────────────────
+  # Optional — set OPA_URL=http://opa:8181 in the backend service to enable.
+  # Run independently: docker compose up opa
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: agentshield_opa
+    ports:
+      - "8181:8181"
+    command:
+      - run
+      - --server
+      - --log-level=info
+      - --addr=0.0.0.0:8181
+      - /policies/agentshield.rego
+    volumes:
+      - ./policy:/policies:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8181/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   postgres_data:
   redis_data:
