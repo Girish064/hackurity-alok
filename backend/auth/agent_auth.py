@@ -83,3 +83,20 @@ async def get_authenticated_agent(
         )
 
     return agent
+
+
+async def get_optional_agent(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    session: AsyncSession = Depends(db_session),
+    redis: aioredis.Redis = Depends(redis_client),
+) -> Agent | None:
+    """
+    FastAPI dependency that resolves an agent if Bearer token is provided,
+    otherwise returns None without raising an error.
+    """
+    if credentials is None or not credentials.credentials:
+        return None
+    try:
+        return await get_authenticated_agent(credentials, session, redis)
+    except Exception:
+        return None

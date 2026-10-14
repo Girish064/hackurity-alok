@@ -170,11 +170,15 @@ def _error_response(
     request_id: str | None,
     status_code: int,
 ) -> JSONResponse:
+    status_str = "blocked" if status_code in (401, 403, 409, 429) else "error"
     return JSONResponse(
         status_code=status_code,
         content={
+            "status": status_str,
+            "code": error_code,
             "error_code": error_code,
             "message": message,
+            "data": {},
             "request_id": request_id,
         },
     )

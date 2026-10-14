@@ -106,10 +106,9 @@ PostgreSQL + Redis + Audit Chain
 
 | Module | Owner |
 |---|---|
-| `backend/` | Alok |
-| `security/` | Girish (reference stub ships; replace internals freely) |
-| `agents/` | Gururaj (demo and adversarial scripts) |
-| `frontend/` | TBD |
+| `backend/`, `core/`, `terminal/`, `dashboard/`, `api/` | Alok (Platform, Terminal, Adaptive Policy Engine, Dashboard, System Integration) |
+| `security/` | Girish (Cryptographic modules, canonicalization, action digest, receipt signing, verification) |
+| `agents/` | Gururaj (Demo scenarios, adversarial attack scripts, red-team observer) |
 
 ## Security Properties
 
@@ -124,17 +123,90 @@ PostgreSQL + Redis + Audit Chain
 
 **Hash-chain limitation**: The audit chain detects modification and reordering of records within a query result. It cannot detect deletion of records or replacement of the entire chain. This is documented and the system makes no stronger guarantee.
 
-## API Summary
+## Unified API Gateway Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| GET | /health | Service health |
-| POST | /agents | Register agent (admin) |
-| GET | /agents/{id} | Get agent (admin) |
-| PATCH | /agents/{id}/revoke | Revoke agent (admin) |
-| POST | /gateway/actions/submit | Submit action (agent bearer token) |
-| GET | /approvals | List pending approvals (admin) |
-| POST | /approvals/{id}/decide | Approve/reject (admin) |
-| POST | /executor/execute | Execute authorized action (capability token) |
-| GET | /audit/events | List audit events |
-| POST | /audit/verify-chain | Verify chain integrity (admin) |
+| Method | Path | Description | Response Contract |
+|---|---|---|---|
+| GET | `/health` | Service health & dependency status | Standard envelope |
+| GET | `/system/status` | Active baseline & module availability | Standard envelope |
+| POST | `/capabilities/issue` | Request capability with adaptive policy scoring | Standard envelope |
+| POST | `/actions/submit` | Submit action & capability for protected execution | Standard envelope |
+| GET | `/actions` | List recent action requests and outcomes | Standard envelope |
+| GET | `/actions/{id}` | Retrieve single action request | Standard envelope |
+| GET | `/receipts` | List available execution receipts | Standard envelope |
+| POST | `/receipts/verify` | Cryptographically verify execution receipt | Standard envelope |
+| GET | `/audit` | Retrieve audit events (standard contract) | Standard envelope |
+| GET | `/audit/events` | List audit events (legacy list format) | Array of events |
+| POST | `/audit/verify-chain` | Verify cryptographic hash chain integrity | Verification report |
+| GET | `/metrics` | Security demonstration metrics | Standard envelope |
+| GET | `/config` | Read active baseline configuration | Standard envelope |
+| POST | `/config` | Switch baseline A/B/C (admin authorized) | Standard envelope |
+
+### Standard Response Envelope
+
+```json
+{
+  "status": "success|blocked|error",
+  "code": "CAPABILITY_ISSUED",
+  "message": "Human-readable description",
+  "data": { ... },
+  "request_id": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+## AGSH Terminal CLI
+
+The AgentShield Terminal CLI (`terminal/agsh.py`) connects directly to the platform API:
+
+```bash
+# Connect agent
+python -m terminal.agsh connect <agent_id> --api-key <key>
+
+# System & component status
+python -m terminal.agsh status
+
+# Submit action for capability / execution
+python -m terminal.agsh action submit --action ISSUE_REFUND --params '{"amount":"500.00"}' --scope 500
+python -m terminal.agsh action submit --action ISSUE_REFUND --params '{"amount":"500.00"}' --execute
+
+# List action submissions
+python -m terminal.agsh actions list
+
+# View execution ledger
+python -m terminal.agsh ledger list
+
+# Verify signed execution receipt
+python -m terminal.agsh receipt verify <receipt_file>
+
+# Tail audit trail
+python -m terminal.agsh audit tail
+
+# Display security metrics
+python -m terminal.agsh metrics show
+
+# Configuration control
+python -m terminal.agsh config show
+python -m terminal.agsh config set C   # Full enforcement
+python -m terminal.agsh config set A   # Minimal protection (test only)
+
+# Reset demo session context
+python -m terminal.agsh reset --demo --yes
+```
+
+## Defender Dashboard
+
+Launch the cybersecurity operations console:
+
+```bash
+streamlit run dashboard/app.py
+```
+
+Sections:
+- **A. System Overview**: Real-time health, active baseline, module status.
+- **B. Live Action Feed**: Actions, decisions, outcomes, block reasons.
+- **C. Adaptive Trust**: Real-time confidence scores, risk level, dynamic TTL.
+- **D. Security Evidence**: Capability verification, digest comparisons, receipts.
+- **E. Baseline Comparison**: Side-by-side comparison of Baselines A, B, and C.
+- **F. Metrics**: Real block rates, execution rates, replay rejections, audit status.
+- **G. Audit & Export**: Hash chain verification, JSON/CSV exports.
+
